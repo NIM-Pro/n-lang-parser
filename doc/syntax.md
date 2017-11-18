@@ -196,30 +196,51 @@ expression =
 
 binaryExpression =
     // This is simplification.
-    | $left: expression
-        $operation: binaryOperation
-        $right: expression
-    | unaryExpression
+    $left: expression
+    $operation: binaryOperation
+    $right: expression
     
 binaryOperation =
     | token("+")
+    | token("+=")
     | token("-")
+    | token("-=")
     | token("*")
+    | token("*=")
     | token("/")
+    | token("/=")
     | token("%")
+    | token("%=")
     | token("=")
+    | token("==")
     | token("**")
+    | token("**=")
     | token("|")
+    | token("|=")
     | token("||")
+    | token("||=")
     | token("^")
+    | token("^=")
     | token("^^")
+    | token("^^=")
     | token("&")
+    | token("&=")
     | token("&&")
-    
+    | token("&&=")
+
 unaryExpression =
+    | unaryPrefixExpression
+    | unaryPostfixExpression
+    
+unaryPrefixExpression =
     // This is simplification.
     $operation: unaryOperator
     $value: expression
+    
+unaryPostfixExpression =
+    // This is simplification.
+    $value: expression
+    $operation: unaryOperator
     
 unaryOperator =
     | token("-")
