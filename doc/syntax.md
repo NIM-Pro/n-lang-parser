@@ -24,7 +24,9 @@ import =
 
 importList =
 	| token("*")
-	| token("{") list(importItem) token("}")
+	| token("{")
+	    $items: list(importItem)
+	    token("}")
 
 importItem =
 	sourceName: ident
@@ -193,6 +195,7 @@ expression =
     | atomicExpression
     | bracketExpression
     | functionBlock
+    | fieldExpression
 
 binaryExpression =
     // This is simplification.
@@ -268,6 +271,8 @@ constExpression = expression
     // This must be an expression that can be calculated at compile time.
     // So, this must use pure functions and constant literals only.
     // So, constants can only be a literals while purify of functions is not implemented.
+
+fieldExpression = // TODO
 
 list(elem, delim = token(",")) =
 	$f: elem

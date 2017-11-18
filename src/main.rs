@@ -70,7 +70,14 @@ named!(lexer<&[u8], Vec<TokenKind>>, do_parse!(
 #[test]
 fn first_test() {
     let input = "12.25+75.2".as_bytes();
-    println!("{:?}", lexer(&input))
+    assert_eq!(
+        lexer(&input),
+        IResult::Done(&[][..], vec![
+            TokenKind::Number(12.25),
+            TokenKind::Plus,
+            TokenKind::Number(75.2),
+        ])
+    );
 }
 
 fn main() {
