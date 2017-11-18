@@ -192,10 +192,10 @@ expression =
     | binaryExpression
     | unaryExpression
     | callExpression
-    | atomicExpression
     | bracketExpression
     | functionBlock
     | fieldExpression
+    | atomicExpression
 
 binaryExpression =
     // This is simplification.
@@ -272,7 +272,10 @@ constExpression = expression
     // So, this must use pure functions and constant literals only.
     // So, constants can only be a literals while purify of functions is not implemented.
 
-fieldExpression = // TODO
+fieldExpression =
+    $object: expression
+    token(".")
+    $field: ident
 
 list(elem, delim = token(",")) =
 	$f: elem
