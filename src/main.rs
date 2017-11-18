@@ -5,16 +5,16 @@ use nom::{IResult, ErrorKind};
 
 #[derive(Debug, PartialEq)]
 enum TokenKind {
-  Number(f64),
-  Plus,
+    Number(f64),
+    Plus,
 }
 
 #[derive(Debug, PartialEq)]
 struct Token<'a> {
-  literal: &'a str,
-  start: usize,
-  end: usize,
-  kind: TokenKind,
+    literal: &'a str,
+    start: usize,
+    end: usize,
+    kind: TokenKind,
 }
 
 named!(number<&[u8], TokenKind>, do_parse!(
@@ -52,11 +52,11 @@ named!(digit<&[u8], u8>, alt!(
 named!(plus<&[u8], TokenKind>, map!(tag!("+"), |_| TokenKind::Plus));
 
 fn eof<T>(input: &[T]) -> IResult<&[T], &[T]> {
-  if input.len() == 0 {
-    IResult::Done(&input[..], &input[..])
-  } else {
-    IResult::Error(ErrorKind::Eof)
-  }
+    if input.len() == 0 {
+        IResult::Done(&input[..], &input[..])
+    } else {
+        IResult::Error(ErrorKind::Eof)
+    }
 }
 
 named!(lexer<&[u8], Vec<TokenKind>>, do_parse!(
@@ -67,7 +67,12 @@ named!(lexer<&[u8], Vec<TokenKind>>, do_parse!(
   (res)
 ));
 
+#[test]
+fn first_test() {
+    let input = "12.25+75.2".as_bytes();
+    println!("{:?}", lexer(&input))
+}
+
 fn main() {
-  let input = "12.25+75.2".as_bytes();
-  println!("{:?}", lexer(&input))
+    unimplemented!()
 }
