@@ -1,85 +1,52 @@
+#![feature(plugin)]
+#![plugin(peg_syntax_ext)]
+
 #[macro_use]
-extern crate nom;
+extern crate serde_derive;
 
-use nom::{IResult, ErrorKind};
+extern crate serde_yaml;
 
-#[derive(Debug, PartialEq)]
-enum TokenKind {
-    Number(f64),
-    Plus,
+mod parse;
+
+use std::fmt::Debug;
+
+#[inline]
+fn stringify_err<T, E : Debug>(input: Result<T, E>) -> Result<T, String> {
+    input.map_err(|e| format!("{:#?}", e))
 }
 
-#[derive(Debug, PartialEq)]
-struct Token<'a> {
-    literal: &'a str,
-    start: usize,
-    end: usize,
-    kind: TokenKind,
+const EXPR: &'static str = "\n
+    foo(\n
+        2 + 2 * 2,\n
+        brr\n
+    ).bar\n
+AND\n
+    bzz\n
+";
+
+fn expr_to_yaml(expression: &str) -> Result<String, String> {
+    stringify_err(parse::expression(expression))
+        .and_then(|ref expr|
+            stringify_err(serde_yaml::to_string(expr))
+        )
 }
 
-named!(number<&[u8], TokenKind>, do_parse!(
-  natural: fold_many1!(digit, 0.0, |acc: f64, item| (acc * 10.0) + f64::from(item)) >>
-  float: opt!(
-    do_parse!(
-      tag!(".") >>
-      res: fold_many1!(digit, (0.0, 1.0/10.0), |(acc, power), item| (acc + f64::from(item)*power, power/10.0)) >>
-      (res.0)
-    )
-  ) >>
-  ({
-    let mut value = f64::from(natural);
-    match float {
-      Some(f) => value += f,
-      _ => {},
-    }
-    TokenKind::Number(value)
-  })
-));
+const SELECT: &'static str = "SELECT * \nFROM foo \nINNER JOIN bar \nON a = b";
 
-named!(digit<&[u8], u8>, alt!(
-  map!(tag!("0"), |_| 0) |
-  map!(tag!("1"), |_| 1) |
-  map!(tag!("2"), |_| 2) |
-  map!(tag!("3"), |_| 3) |
-  map!(tag!("4"), |_| 4) |
-  map!(tag!("5"), |_| 5) |
-  map!(tag!("6"), |_| 6) |
-  map!(tag!("7"), |_| 7) |
-  map!(tag!("8"), |_| 8) |
-  map!(tag!("9"), |_| 9)
-));
-
-named!(plus<&[u8], TokenKind>, map!(tag!("+"), |_| TokenKind::Plus));
-
-fn eof<T>(input: &[T]) -> IResult<&[T], &[T]> {
-    if input.len() == 0 {
-        IResult::Done(&input[..], &input[..])
-    } else {
-        IResult::Error(ErrorKind::Eof)
-    }
-}
-
-named!(lexer<&[u8], Vec<TokenKind>>, do_parse!(
-  res: many0!(alt!(
-    plus | number
-  )) >>
-  eof >>
-  (res)
-));
-
-#[test]
-fn first_test() {
-    let input = "12.25+75.2".as_bytes();
-    assert_eq!(
-        lexer(&input),
-        IResult::Done(&[][..], vec![
-            TokenKind::Number(12.25),
-            TokenKind::Plus,
-            TokenKind::Number(75.2),
-        ])
-    );
+fn select_to_yaml(query: &str) -> Result<String, String> {
+    stringify_err(parse::select(query))
+        .and_then(|ref expr|
+            stringify_err(serde_yaml::to_string(expr))
+        )
 }
 
 fn main() {
-    unimplemented!()
+    match expr_to_yaml(EXPR) {
+        Ok(value) => println!("Expression: {}", value),
+        Err(err) => println!("Got error: {}", err),
+    }
+    match select_to_yaml(SELECT) {
+        Ok(value) => println!("Selection: {}", value),
+        Err(err) => println!("Got error: {}", err),
+    }
 }

@@ -1,0 +1,6 @@
+use tokens;
+
+#[pub]
+int -> tokens::Number<'input>
+    = p: #position z:$("0") { tokens::Number(p, z) }
+    / p: #position o:$([1-9] [0-9]*) { tokens::Number(p, o) }

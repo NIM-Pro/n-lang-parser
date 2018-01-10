@@ -1,0 +1,285 @@
+use super::definitions::*;
+
+whitespace = #quiet<[ \n\t]+>
+
+basic<R> = whitespace* R whitespace*
+
+keyword<W> = basic<W ![A-zА-я_0-9]>
+
+is_match<R> = r: R? { r.is_some() }
+
+identifier -> &'input str = #quiet<
+    whitespace*
+    id: $([A-z] [A-z_0-9]*)
+    whitespace*
+    { id }
+> / #expected("identifier")
+
+list<element, delimiter> =
+    r: (element ** delimiter)
+    delimiter?
+    { r }
+
+commaList<element> = list<element, basic<",">>
+
+#[pub]
+select_stmt -> SelectStatement<'input> =
+    keyword<"SELECT">
+    modifiers: select_modifiers
+    expressions: select_expressions
+    keyword<"FROM">
+    source: select_source
+    where_clause: select_where_clause?
+    { SelectStatement {
+        modifiers,
+        expressions,
+        source,
+        where_clause,
+    } }
+
+select_modifiers -> SelectModifiers =
+    distinct: select_distinct_mod
+    high_priority: is_match<keyword<"HIGH_PRIORITY">>
+    straight_join: is_match<keyword<"STRAIGHT_JOIN">>
+    result_size: select_result_size
+    buffer_result: is_match<keyword<"SQL_BUFFER_RESULT">>
+    { SelectModifiers {
+        distinct,
+        high_priority,
+        straight_join,
+        result_size,
+        buffer_result,
+    } }
+
+select_distinct_mod -> SelectDistinctMod
+    = keyword<"ALL"> { SelectDistinctMod::All }
+    / keyword<"DISTINCT"> { SelectDistinctMod::Distinct }
+    / keyword<"DISTINCTROW"> { SelectDistinctMod::Distinct }
+    / { SelectDistinctMod::All }
+
+select_result_size -> SelectResultSize
+    = keyword<"SQL_BIG_RESULT"> { SelectResultSize::Big }
+    / keyword<"SQL_SMALL_RESULT"> { SelectResultSize::Small }
+    / { SelectResultSize::Unknown }
+
+select_expressions -> SelectExpressions<'input>
+    = basic<"*"> { SelectExpressions::All }
+    / args: commaList<select_expression> { SelectExpressions::List(args) }
+
+aliased<element, delimiter, alias> =
+    e: element
+    a: (delimiter r: alias { r })?
+    { (e, a) }
+
+aliasedByAs<element> = aliased<element, keyword<"AS">, identifier>
+
+aliasedByMaybeAs<element> = aliased<element, keyword<"AS">?, identifier>
+
+select_expression -> SelectExpression<'input> =
+    expr: aliasedByAs<expression> {
+        let (expression, alias) = expr;
+        SelectExpression { expression, alias }
+    }
+
+select_source -> SelectSource<'input>
+    = source: select_table_source
+        tails: select_join_tail*
+        {
+            let mut result = source;
+            for (tail_join, tail_source) in tails {
+                result = SelectSource::make_join(tail_join, result, tail_source);
+            }
+            result
+        }
+
+select_table_source -> SelectSource<'input>
+    = table: aliasedByAs<identifier>
+        partitions: select_partitions?
+        {
+            let name = table.0;
+            let alias = table.1.unwrap_or(name);
+            SelectSource::Table { name, alias, partitions }
+        }
+    / query: aliasedByMaybeAs<select_stmt>
+        {
+            let (statement, alias) = query;
+            SelectSource::make_query(statement, alias)
+        }
+    / basic<"(">
+        r: select_source
+        basic<")">
+        { r }
+
+select_partitions -> Vec<&'input str> =
+    keyword<"PARTITION">
+    r: commaList<identifier>
+    { r }
+
+select_join_tail -> (SelectJoin<'input>, SelectSource<'input>)
+    = keyword<"INNER">
+        keyword<"JOIN">
+        s: select_table_source
+        c: select_join_condition
+        { (SelectJoin::Inner(c), s) }
+    / keyword<"CROSS">
+        keyword<"JOIN">
+        s: select_table_source
+        c: select_join_condition
+        { (SelectJoin::Cross(c), s) }
+    / keyword<"STRAIGHT_JOIN">
+        s: select_table_source
+        c: (
+            keyword<"ON">
+            e: expression
+            { e }
+        )?
+        { (SelectJoin::Straight(c), s) }
+    / i: select_sided_join_info
+        keyword<"JOIN">
+        s: select_table_source
+        c: select_join_condition
+        { (SelectJoin::Sided(i, c), s) }
+    / keyword<"NATURAL">
+        i: select_sided_join_info
+        keyword<"JOIN">
+        s: select_table_source
+        { (SelectJoin::Natural(i), s) }
+
+select_join_condition -> SelectJoinCondition<'input>
+    = keyword<"ON">
+        e: expression
+        { SelectJoinCondition::Expression(e) }
+    / keyword<"USING">
+        basic<"(">
+        c: commaList<identifier>
+        basic<")">
+        { SelectJoinCondition::Using(c) }
+
+select_sided_join_info -> SelectSidedJoinInfo =
+    side: (
+        keyword<"LEFT"> { SelectJoinSide::Left }
+        / keyword<"RIGHT"> { SelectJoinSide::Right }
+    )
+    is_outer: is_match<keyword<"OUTER">>
+    { SelectSidedJoinInfo { side, is_outer } }
+
+select_where_clause -> Expression<'input> =
+    keyword<"WHERE">
+    r: expression
+    { r }
+
+#[pub]
+expression -> Expression<'input> = #infix<postfixUnaryExpression> {
+    #L x basic<"||"> y { Expression::make_binary(BinaryOperator::Or, x, y) }
+    #L x basic<"OR"> y { Expression::make_binary(BinaryOperator::Or, x, y) }
+    #L x basic<"XOR"> y { Expression::make_binary(BinaryOperator::XOr, x, y) }
+    #L x basic<"&&"> y { Expression::make_binary(BinaryOperator::And, x, y) }
+    #L x basic<"AND"> y { Expression::make_binary(BinaryOperator::And, x, y) }
+    #L x basic<"|"> y { Expression::make_binary(BinaryOperator::BitOr, x, y) }
+    #L x basic<"^"> y { Expression::make_binary(BinaryOperator::BitXOr, x, y) }
+    #L x basic<"&"> y { Expression::make_binary(BinaryOperator::BitAnd, x, y) }
+    #L x basic<"<<"> y { Expression::make_binary(BinaryOperator::ShiftLeft, x, y) }
+    #L x basic<">>"> y { Expression::make_binary(BinaryOperator::ShiftRight, x, y) }
+    #L x (keyword<"IS"> keyword<"IN">) y { Expression::make_binary(BinaryOperator::IsIn, x, y) }
+    #L x basic<"="> y { Expression::make_binary(BinaryOperator::Equals, x, y) }
+    #L x basic<">="> y { Expression::make_binary(BinaryOperator::MoreThanOrEquals, x, y) }
+    #L x basic<">"> y { Expression::make_binary(BinaryOperator::MoreThan, x, y) }
+    #L x basic<"<="> y { Expression::make_binary(BinaryOperator::LessThanOrEquals, x, y) }
+    #L x basic<"<"> y { Expression::make_binary(BinaryOperator::LessThan, x, y) }
+    #L x keyword<"LIKE"> y { Expression::make_binary(BinaryOperator::Like, x, y) }
+    #L x (keyword<"SOUNDS"> keyword<"LIKE">) y { Expression::make_binary(BinaryOperator::SoundsLike, x, y) }
+    #L x keyword<"REGEXP"> y { Expression::make_binary(BinaryOperator::RegExp, x, y) }
+    #L x basic<"+"> y { Expression::make_binary(BinaryOperator::Plus, x, y) }
+    #L x basic<"-"> y { Expression::make_binary(BinaryOperator::Minus, x, y) }
+    #L x basic<"*"> y { Expression::make_binary(BinaryOperator::Times, x, y) }
+    #L x basic<"/"> y { Expression::make_binary(BinaryOperator::Divide, x, y) }
+    #L x basic<"%"> y { Expression::make_binary(BinaryOperator::Mod, x, y) }
+    #L x keyword<"MOD"> y { Expression::make_binary(BinaryOperator::Mod, x, y) }
+    #L x keyword<"DIV"> y { Expression::make_binary(BinaryOperator::Div, x, y) }
+    #L x keyword<"COLLATE"> y { Expression::make_binary(BinaryOperator::Collate, x, y) }
+    #L x basic<".."> y { Expression::make_binary(BinaryOperator::Interval, x, y) }
+}
+
+postfixUnaryOperator -> (PostfixUnaryOperator<'input>, bool)
+    = keyword<"IS">
+        rev: is_match<keyword<"NOT">>
+        keyword<"NULL">
+        { (PostfixUnaryOperator::IsNull, rev) }
+    / keyword<"IS">
+        rev: is_match<keyword<"NOT">>
+        keyword<"TRUE">
+        { (PostfixUnaryOperator::IsTrue, rev) }
+    / keyword<"IS">
+        rev: is_match<keyword<"NOT">>
+        keyword<"FALSE">
+        { (PostfixUnaryOperator::IsFalse, rev) }
+    / keyword<"IS">
+        rev: is_match<keyword<"NOT">>
+        keyword<"UNKNOWN">
+        { (PostfixUnaryOperator::IsUnknown, rev) }
+    / basic<".">
+        fieldName: identifier
+        { (PostfixUnaryOperator::FieldAppeal(fieldName), false) }
+
+postfixUnaryExpression -> Expression<'input> =
+    expr: atomicExpression
+    operators: postfixUnaryOperator*
+    {
+        let mut result = expr;
+        for (operator, inverted) in operators {
+            result = Expression::make_postfix_unary(operator, result);
+            if inverted {
+                result = Expression::make_prefix_unary(PrefixUnaryOperator::Not, result);
+            }
+        }
+        result
+    }
+
+atomicExpression -> Expression<'input>
+    = expressionLiteral
+    / set: expressionSet
+        { Expression::Set(set) }
+    / name: identifier
+        args: expressionSet
+        { Expression::make_function_call(name, args) }
+    / prefix: prefixUnaryOperator
+        expr: expression
+        { Expression::make_prefix_unary(prefix, expr) }
+    / name: identifier
+        { Expression::Identifier(name) }
+
+expressionLiteral -> Expression<'input>
+    = text: $(expressionNumberLiteral)
+        { Expression::make_literal(LiteralType::Number, text) }
+    / text: $(expressionStringLiteral)
+        { Expression::make_literal(LiteralType::String, text) }
+    / text: $(expressionCharacterLiteral)
+        { Expression::make_literal(LiteralType::Character, text) }
+    / text: $(expressionBooleanLiteral)
+        { Expression::make_literal(LiteralType::Boolean, text) }
+
+expressionNumberLiteral = "0x"? [0-9A-F]+ ("." [0-9A-F]+)?
+
+expressionStringLiteral = "\"" (!"\"" .)+ "\""
+
+expressionCharacterLiteral = "'" !"'" "\\"? . "'"
+
+expressionBooleanLiteral = "true" / "false"
+
+expressionSet -> Vec<Expression<'input>> =
+    basic<"(">
+    r: commaList<expression>
+    basic<")">
+    { r }
+
+prefixUnaryOperator -> PrefixUnaryOperator
+    = keyword<"NOT"> { PrefixUnaryOperator::Not }
+    / basic<"!"> { PrefixUnaryOperator::Not }
+    / keyword<"ALL"> { PrefixUnaryOperator::All }
+    / keyword<"ANY"> { PrefixUnaryOperator::Any }
+    / basic<"+"> { PrefixUnaryOperator::Plus }
+    / basic<"-"> { PrefixUnaryOperator::Minus }
+    / basic<"~"> { PrefixUnaryOperator::Tilde }
+    / keyword<"BINARY"> { PrefixUnaryOperator::Binary }
+    / keyword<"ROW"> { PrefixUnaryOperator::Row }
+    / keyword<"EXISTS"> { PrefixUnaryOperator::Exists }
