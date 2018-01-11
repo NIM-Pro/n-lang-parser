@@ -94,11 +94,39 @@ impl<'a> SelectSource<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
+pub enum SelectOrderType {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub struct SelectOrderItem<'a> {
+    pub expression: Expression<'a>,
+    pub order_type: SelectOrderType,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub struct SelectGroupByClause<'a> {
+    pub items: Vec<SelectOrderItem<'a>>,
+    pub with_rollup: bool,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub struct SelectLimit<'a> {
+    pub count: Expression<'a>,
+    pub offset: Option<Expression<'a>>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct SelectStatement<'a> {
     pub modifiers: SelectModifiers,
     pub expressions: SelectExpressions<'a>,
     pub source: SelectSource<'a>,
     pub where_clause: Option<Expression<'a>>,
+    pub group_by_clause: Option<SelectGroupByClause<'a>>,
+    pub having_clause: Option<Expression<'a>>,
+    pub order_by_clause: Option<Vec<SelectOrderItem<'a>>>,
+    pub limit_clause: Option<SelectLimit<'a>>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize)]

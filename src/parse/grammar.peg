@@ -30,11 +30,19 @@ select_stmt -> SelectStatement<'input> =
     keyword<"FROM">
     source: select_source
     where_clause: select_where_clause?
+    group_by_clause: select_group_by_clause?
+    having_clause: select_having_clause?
+    order_by_clause: select_order_by_clause?
+    limit_clause: select_limit_clause?
     { SelectStatement {
         modifiers,
         expressions,
         source,
         where_clause,
+        group_by_clause,
+        having_clause,
+        order_by_clause,
+        limit_clause,
     } }
 
 select_modifiers -> SelectModifiers =
@@ -115,7 +123,9 @@ select_partitions -> Vec<&'input str> =
     r: commaList<identifier>
     { r }
 
-select_join_tail -> (SelectJoin<'input>, SelectSource<'input>)
+select_join_tail -> (SelectJoin<'input>, SelectSource<'input>) = #quiet<_select_join_tail> / #expected("join tail")
+
+_select_join_tail -> (SelectJoin<'input>, SelectSource<'input>)
     = keyword<"INNER">
         keyword<"JOIN">
         s: select_table_source
@@ -163,18 +173,74 @@ select_sided_join_info -> SelectSidedJoinInfo =
     is_outer: is_match<keyword<"OUTER">>
     { SelectSidedJoinInfo { side, is_outer } }
 
-select_where_clause -> Expression<'input> =
-    keyword<"WHERE">
+expression_clause<prefix> =
+    prefix
     r: expression
     { r }
 
+select_where_clause -> Expression<'input> = #quiet<expression_clause<keyword<"WHERE">>> / #expected("where clause")
+
+select_having_clause -> Expression<'input> = #quiet<expression_clause<keyword<"HAVING">>> / #expected("having clause")
+
+select_group_by_clause -> SelectGroupByClause<'input> = #quiet<_select_group_by_clause> / #expected("group by clause")
+
+_select_group_by_clause -> SelectGroupByClause<'input> =
+    keyword<"GROUP">
+    keyword<"BY">
+    items: commaList<select_order_item>
+    with_rollup: is_match<(
+        keyword<"WITH">
+        keyword<"ROLLUP">
+    )>
+    { SelectGroupByClause { items, with_rollup } }
+
+select_order_by_clause -> Vec<SelectOrderItem<'input>> = #quiet<_select_order_by_clause> / #expected("order by clause")
+
+_select_order_by_clause -> Vec<SelectOrderItem<'input>> =
+    keyword<"ORDER">
+    keyword<"BY">
+    r: commaList<select_order_item>
+    { r }
+
+select_order_item -> SelectOrderItem<'input> =
+    expression: expression
+    order_type: select_order_type
+    { SelectOrderItem { expression, order_type } }
+
+select_order_type -> SelectOrderType =
+    r: (
+        keyword<"ASC"> { SelectOrderType::Asc }
+        / keyword<"DESC"> { SelectOrderType::Desc }
+    )?
+    { r.unwrap_or(SelectOrderType::Asc) }
+
+select_limit_clause -> SelectLimit<'input> = #quiet<_select_limit_clause> / #expected("limit clause")
+
+_select_limit_clause -> SelectLimit<'input>
+    = keyword<"LIMIT">
+        offset: (
+            o: expressionIntegerLiteral
+            basic<",">
+            { o }
+        )?
+        count: expressionIntegerLiteral
+        { SelectLimit { count, offset } }
+    / keyword<"LIMIT">
+        count: expressionIntegerLiteral
+        keyword<"OFFSET">
+        offset: expressionIntegerLiteral
+        { SelectLimit { count, offset: Some(offset) } }
+
 #[pub]
-expression -> Expression<'input> = #infix<postfixUnaryExpression> {
+expression -> Expression<'input> = #quiet<_expression> / #expected("expression")
+
+#[pub]
+_expression -> Expression<'input> = #infix<postfixUnaryExpression> {
     #L x basic<"||"> y { Expression::make_binary(BinaryOperator::Or, x, y) }
-    #L x basic<"OR"> y { Expression::make_binary(BinaryOperator::Or, x, y) }
-    #L x basic<"XOR"> y { Expression::make_binary(BinaryOperator::XOr, x, y) }
+    #L x keyword<"OR"> y { Expression::make_binary(BinaryOperator::Or, x, y) }
+    #L x keyword<"XOR"> y { Expression::make_binary(BinaryOperator::XOr, x, y) }
     #L x basic<"&&"> y { Expression::make_binary(BinaryOperator::And, x, y) }
-    #L x basic<"AND"> y { Expression::make_binary(BinaryOperator::And, x, y) }
+    #L x keyword<"AND"> y { Expression::make_binary(BinaryOperator::And, x, y) }
     #L x basic<"|"> y { Expression::make_binary(BinaryOperator::BitOr, x, y) }
     #L x basic<"^"> y { Expression::make_binary(BinaryOperator::BitXOr, x, y) }
     #L x basic<"&"> y { Expression::make_binary(BinaryOperator::BitAnd, x, y) }
@@ -257,6 +323,10 @@ expressionLiteral -> Expression<'input>
         { Expression::make_literal(LiteralType::Character, text) }
     / text: $(expressionBooleanLiteral)
         { Expression::make_literal(LiteralType::Boolean, text) }
+
+expressionIntegerLiteral -> Expression<'input> =
+    text: $([0-9]+)
+    { Expression::make_literal(LiteralType::Number, text) }
 
 expressionNumberLiteral = "0x"? [0-9A-F]+ ("." [0-9A-F]+)?
 
