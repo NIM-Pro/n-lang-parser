@@ -1,4 +1,8 @@
-use super::definitions::*;
+use super::definitions::select::*;
+use super::definitions::expression::*;
+use super::definitions::update::*;
+use super::definitions::insert::*;
+use super::definitions::delete::*;
 
 whitespace = #quiet<[ \n\t]+>
 
@@ -20,7 +24,15 @@ list<element, delimiter> =
     delimiter?
     { r }
 
+bracketList<begin, element, delimiter, end> =
+    begin
+    r: list<element, delimiter>
+    end
+    { r }
+
 commaList<element> = list<element, basic<",">>
+
+bracketCommaList<element> = bracketList<basic<"(">, element, basic<",">, basic<")">>
 
 #[pub]
 select_stmt -> SelectStatement<'input> =
@@ -134,7 +146,7 @@ _select_join_tail -> (SelectJoin<'input>, SelectSource<'input>)
     / keyword<"CROSS">
         keyword<"JOIN">
         s: select_table_source
-        c: select_join_condition
+        c: select_join_condition?
         { (SelectJoin::Cross(c), s) }
     / keyword<"STRAIGHT_JOIN">
         s: select_table_source
@@ -154,15 +166,16 @@ _select_join_tail -> (SelectJoin<'input>, SelectSource<'input>)
         keyword<"JOIN">
         s: select_table_source
         { (SelectJoin::Natural(i), s) }
+    / basic<",">
+        s: select_table_source
+        { (SelectJoin::Cross(None), s) }
 
 select_join_condition -> SelectJoinCondition<'input>
     = keyword<"ON">
         e: expression
         { SelectJoinCondition::Expression(e) }
     / keyword<"USING">
-        basic<"(">
-        c: commaList<identifier>
-        basic<")">
+        c: bracketCommaList<identifier>
         { SelectJoinCondition::Using(c) }
 
 select_sided_join_info -> SelectSidedJoinInfo =
@@ -234,7 +247,6 @@ _select_limit_clause -> SelectLimit<'input>
 #[pub]
 expression -> Expression<'input> = #quiet<_expression> / #expected("expression")
 
-#[pub]
 _expression -> Expression<'input> = #infix<postfixUnaryExpression> {
     #L x basic<"||"> y { Expression::make_binary(BinaryOperator::Or, x, y) }
     #L x keyword<"OR"> y { Expression::make_binary(BinaryOperator::Or, x, y) }
@@ -323,6 +335,8 @@ expressionLiteral -> Expression<'input>
         { Expression::make_literal(LiteralType::Character, text) }
     / text: $(expressionBooleanLiteral)
         { Expression::make_literal(LiteralType::Boolean, text) }
+    / text: $(expressionPrimitiveLiteral)
+        { Expression::make_literal(LiteralType::Primitive, text) }
 
 expressionIntegerLiteral -> Expression<'input> =
     text: $([0-9]+)
@@ -335,6 +349,8 @@ expressionStringLiteral = "\"" (!"\"" .)+ "\""
 expressionCharacterLiteral = "'" !"'" "\\"? . "'"
 
 expressionBooleanLiteral = "true" / "false"
+
+expressionPrimitiveLiteral = "null"
 
 expressionSet -> Vec<Expression<'input>> =
     basic<"(">
@@ -353,3 +369,127 @@ prefixUnaryOperator -> PrefixUnaryOperator
     / keyword<"BINARY"> { PrefixUnaryOperator::Binary }
     / keyword<"ROW"> { PrefixUnaryOperator::Row }
     / keyword<"EXISTS"> { PrefixUnaryOperator::Exists }
+
+#[pub]
+update_stmt -> UpdateStatement<'input>
+    = keyword<"UPDATE">
+        low_priority: is_match<keyword<"LOW_PRIORITY">>
+        ignore: is_match<keyword<"IGNORE">>
+        source: select_source
+        assignments: update_assignment_list
+        where_clause: select_where_clause?
+        order_by_clause: select_order_by_clause?
+        limit: update_limit_clause?
+        { UpdateStatement {
+            low_priority,
+            ignore,
+            update: UpdateType::Simple {
+                source,
+                order_by_clause,
+                limit,
+            },
+            assignments,
+            where_clause,
+        } }
+    / keyword<"UPDATE">
+        low_priority: is_match<keyword<"LOW_PRIORITY">>
+        ignore: is_match<keyword<"IGNORE">>
+        source: commaList<select_source>
+        assignments: update_assignment_list
+        where_clause: select_where_clause?
+        { UpdateStatement {
+            low_priority,
+            ignore,
+            update: UpdateType::MultiTable {
+                source,
+            },
+            assignments,
+            where_clause,
+        } }
+
+update_assignment_list -> Vec<UpdateAssignment<'input>> =
+    keyword<"SET">
+    r: commaList<update_assignment>
+    { r }
+
+update_assignment -> UpdateAssignment<'input> = #quiet<_update_assignment> / #expected("assignment")
+
+_update_assignment -> UpdateAssignment<'input> =
+    column: postfixUnaryExpression
+    basic<"=">
+    value: update_value
+    { UpdateAssignment { column, value } }
+
+update_value -> UpdateValue<'input>
+    = keyword<"DEFAULT"> { UpdateValue::Default }
+    / e: expression { UpdateValue::Expression(e) }
+
+update_limit_clause -> Expression<'input> = #quiet<_update_limit_clause> / #expected("update limit clause")
+
+_update_limit_clause -> Expression<'input> =
+    keyword<"LIMIT">
+    count: expressionIntegerLiteral
+    { count }
+
+#[pub]
+insert_stmt -> InsertStatement<'input> =
+    keyword<"INSERT">
+    priority: insert_priority
+    ignore: is_match<keyword<"IGNORE">>
+    keyword<"INTO">
+    target: select_source
+    source: insert_source
+    on_duplicate_key_update: insert_on_duplicate_key_update?
+    { InsertStatement {
+        priority,
+        ignore,
+        target,
+        source,
+        on_duplicate_key_update,
+    } }
+
+insert_priority -> InsertPriority
+    = keyword<"LOW_PRIORITY"> { InsertPriority::Low }
+    / keyword<"DELAYED"> { InsertPriority::Delayed }
+    / keyword<"HIGH_PRIORITY"> { InsertPriority::High }
+    / { InsertPriority::Unknown }
+
+insert_source -> InsertSource<'input>
+    = assignments: update_assignment_list
+        { InsertSource::Assignment { assignments } }
+    / columns: bracketCommaList<identifier>?
+        statement: select_stmt
+        { InsertSource::Selection { columns, statement } }
+    / columns: bracketCommaList<identifier>?
+        (keyword<"VALUES"> / keyword<"VALUE">)
+        rows: bracketCommaList<commaList<update_value>>
+        { InsertSource::Values { columns, rows } }
+
+insert_on_duplicate_key_update -> Vec<UpdateAssignment<'input>> =
+    keyword<"ON">
+    keyword<"DUPLICATE">
+    keyword<"KEY">
+    keyword<"UPDATE">
+    r: commaList<update_assignment>
+    { r }
+
+#[pub]
+delete_stmt -> DeleteStatement<'input> =
+    keyword<"DELETE">
+    low_priority: is_match<keyword<"LOW_PRIORITY">>
+    quick: is_match<keyword<"QUICK">>
+    ignore: is_match<keyword<"IGNORE">>
+    keyword<"FROM">
+    source: select_source
+    where_clause: select_where_clause?
+    order_by_clause: select_order_by_clause?
+    limit: update_limit_clause?
+    { DeleteStatement {
+        low_priority,
+        quick,
+        ignore,
+        source,
+        where_clause,
+        order_by_clause,
+        limit,
+    } }
