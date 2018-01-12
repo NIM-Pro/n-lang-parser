@@ -2,15 +2,17 @@
 #![plugin(peg_syntax_ext)]
 
 extern crate serde;
-
 #[macro_use]
 extern crate serde_derive;
-
 extern crate serde_yaml;
 
 mod parse;
+mod arg_config;
 
 use std::fmt::Debug;
+use std::env::args;
+use std::process::exit;
+use arg_config::{ArgConfig, ArgConfigParseError};
 
 #[inline]
 fn stringify_err<T, E: Debug>(input: Result<T, E>) -> Result<T, String> {
@@ -44,7 +46,7 @@ const INSERT: &'static str = "INSERT INTO foo (a, bar, baz) VALUES (1, 2, null)"
 
 const DELETE: &'static str = "DELETE FROM foo, bar WHERE boo.a = 1 OR foo.a = 2";
 
-fn main() {
+fn was_main() {
     match to_yaml(parse::expression(EXPR)) {
         Ok(value) => println!("Expression: {}", value),
         Err(err) => println!("Got error while parsing expression: {}", err),
@@ -71,3 +73,44 @@ fn main() {
 // TODO Writing output to file
 // TODO Writing output to console
 // TODO Printing help screen
+
+fn main() {
+    let mut config = match ArgConfig::new(args()) {
+        Ok(c) => c,
+        Err(e) => {
+            match e {
+                ArgConfigParseError::NeedsHelpScreen => {
+                    println!("{}", include_str!("help.txt"));
+                    exit(0);
+                }
+                ArgConfigParseError::IOError(e) => {
+                    println!("Error while reading command-line arguments: {}", e);
+                    exit(1);
+                },
+            }
+        },
+    };
+    let input = match config.read_input(1024) {
+        Ok(i) => i,
+        Err(e) => {
+            println!("Error while reading input: {}", e);
+            exit(2);
+        },
+    };
+    println!("Input: {}", input);
+    let stmt = match parse::statement(&input) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("Error while parsing input: {}", e);
+            exit(3);
+        },
+    };
+    let yaml = match serde_yaml::to_string(&stmt) {
+        Ok(y) => y,
+        Err(e) => {
+            println!("Error while serializing into YAML: {}", e);
+            exit(4);
+        },
+    };
+    println!("{}", yaml);
+}

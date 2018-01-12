@@ -3,8 +3,9 @@ use super::definitions::expression::*;
 use super::definitions::update::*;
 use super::definitions::insert::*;
 use super::definitions::delete::*;
+use super::definitions::statement::*;
 
-whitespace = #quiet<[ \n\t]+>
+whitespace = #quiet<[ \n\t\r]+>
 
 basic<R> = whitespace* R whitespace*
 
@@ -493,3 +494,12 @@ delete_stmt -> DeleteStatement<'input> =
         order_by_clause,
         limit,
     } }
+
+#[pub]
+statement -> Statement<'input>
+    =
+    s: select_stmt { Statement::Select(s) }
+    / s: insert_stmt { Statement::Insert(s) }
+    / s: update_stmt { Statement::Update(s) }
+    / s: delete_stmt { Statement::Delete(s) }
+    / s: expression { Statement::Expression(s) }

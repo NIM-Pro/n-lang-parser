@@ -1,0 +1,7 @@
+R-parse tool helps to understand SQL queries.
+Usage: r-parse INPUT [OUTPUT]
+
+Filename or "con" can be used as INPUT and OUTPUT. Default value of OUTPUT is "con".
+"con" value means data will be read from or write into console instead of file.
+Filename as value means data will be read from or write into file whose filename was given.
+INPUT must be specified because of needs to show this screen, OUTPUT don't.

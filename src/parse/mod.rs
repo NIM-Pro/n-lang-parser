@@ -23,3 +23,7 @@ pub fn insert<'input>(input: &'input str) -> Result<definitions::insert::InsertS
 pub fn delete<'input>(input: &'input str) -> Result<definitions::delete::DeleteStatement<'input>, grammar::ParseError> {
     grammar::delete_stmt(input)
 }
+
+pub fn statement<'input>(input: &'input str) -> Result<definitions::statement::Statement<'input>, grammar::ParseError> {
+    grammar::statement(input)
+}
