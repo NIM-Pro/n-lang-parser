@@ -16,7 +16,7 @@ Let see what is this means.
 
 ## Data manipulation language
 
-DML of N is very very like MySQL's DML. Look on SELECT-statement syntax.
+DML of N is very very like MySQL's DML. Look on `SELECT`-statement syntax.
 
 ```
 select_stmt = SELECT select_modifiers select_expressions
@@ -65,3 +65,19 @@ select_limit_clause =
     / LIMIT integer[, integer]
     / LIMIT integer OFFSET integer
 ```
+
+The `WHERE` clause, if given, indicates the condition or conditions that
+rows must satisfy to be selected. where_condition is an expression that
+evaluates to true for each row to be selected. The statement selects all
+rows if there is no `WHERE` clause.
+In the `WHERE` expression, you can use any of the functions and operators
+that N supports, except for aggregate (summary) functions.
+
+In general, clauses used must be given in exactly the order shown in the
+syntax description. For example, a `HAVING` clause must come after any
+`GROUP BY` clause and before any ORDER BY clause.
+
+[comment]: <> (TODO Keywords explaining)
+
+Explaining of keywords like HIGH_PRIORITY or DISTINCTROW will be added later.
+Rule select_source see in next part. 
