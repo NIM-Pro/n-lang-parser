@@ -1,0 +1,54 @@
+enum Sex {
+    Male,
+    Female,
+}
+
+struct UserInfo {
+    first_name: string,
+    last_name: string,
+    sex: Sex,
+    #[check_fn(CheckAge)]
+    age: uint,
+}
+
+struct UserFriendship {
+    members: (User, User),
+}
+
+table Users {
+    #[primary_key, auto_increment]
+    id: uint,
+    nickname: string,
+    info: UserInfo,
+}
+
+struct Users::PrimaryKey {
+    id: uint,
+}
+
+struct Users::Entity {
+    id: uint?,
+    nickname: string,
+    sex: Sex,
+}
+
+fn CheckAge(given_age: uint) -> bool {
+    given_age >= 18
+}
+
+pub fn GetUsersByAge(min: uint, max: uint)
+    -> Users::Entity[] {
+    SELECT * FROM Users
+        WHERE info.age IS IN (min .. max)
+}
+
+pub fn SetUserNickname(id: uint, nickname: string) -> bool {
+    let user_count = SELECT COUNT(*) FROM Users
+        WHERE Users.id = id
+        LIMIT 1;
+    if user_count == 0 {
+        return false;
+    }
+    UPDATE Users SET Users.nickname = nickname;
+    return true;
+}

@@ -2,6 +2,7 @@
   <dictionary name="NotIntBook">
     <words>
       <w>serde</w>
+      <w>uint</w>
       <w>yaml</w>
     </words>
   </dictionary>
